@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sokak Ligi | Online Pro</title>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-database-compat.js"></script>
+    
+    <style>
+        /* Önceki stiller aynen kalabilir, buraya sadece online yapı eklenecek */
+        :root { --primary: #00ff88; --secondary: #2979ff; --danger: #ff5252; --bg: #0f172a; --card: #1e293b; --text: #f8fafc; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; display: flex; justify-content: center; }
+        .main-wrapper { display: grid; grid-template-columns: 1.5fr 1fr; gap: 25px; max-width: 1200px; width: 100%; }
+        .container, .sidebar { background: var(--card); padding: 25px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h2, h3 { border-bottom: 2px solid var(--primary); color: var(--primary); }
+        .match-card { background: #1e293b; padding: 15px; margin: 10px 0; border-radius: 12px; border: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+        input { background: #334155; border: none; padding: 10px; border-radius: 8px; color: white; }
+        .score-input { width: 40px; text-align: center; border: 1px solid var(--primary); }
+        button { cursor: pointer; border-radius: 8px; border: none; font-weight: bold; padding: 10px; transition: 0.3s; }
+        .btn-add { background: var(--primary); }
+        .btn-match { background: var(--secondary); color: white; width: 100%; }
+        table { width: 100%; border-collapse: collapse; }
+        td, th { padding: 10px; border-bottom: 1px solid #334155; text-align: left; }
+    </style>
+</head>
+<body>
+
+<div class="main-wrapper">
+    <div class="container">
+        <h2>⚽ Online Turnuva</h2>
+        <div style="display:flex; gap:10px; margin-bottom:20px;">
+            <input type="text" id="teamName" placeholder="Takım ismi..." style="flex:1">
+            <button class="btn-add" onclick="addTeam()">EKLE</button>
+        </div>
+        <div id="teamManageList"></div>
+        <button class="btn-match" onclick="drawMatches()">🎲 EŞLEŞTİR</button>
+        <div id="bracket"></div>
+        <button id="nextRoundBtn" class="btn-match" style="display:none; background:#f59e0b;" onclick="processWinners()">🏆 TURU TAMAMLA</button>
+    </div>
+
+    <div class="sidebar">
+        <h3>📊 PUAN DURUMU</h3>
+        <table id="statsTable"></table>
+        <div id="fixtureList" style="margin-top:20px; background:#0f172a; padding:10px; border-radius:10px;"></div>
+        <button onclick="clearData()" style="margin-top:20px; color:var(--danger); background:none; border:1px solid var(--danger); width:100%">Sıfırla</button>
+    </div>
+</div>
+
+<script>
+    // --- BURAYA KENDİ FİREBASE BİLGİLERİNİ YAPIŞTIR KANKA ---
+    const firebaseConfig = {
+        apiKey: "SENIN_API_KEY",
+        authDomain: "PROJEN.firebaseapp.com",
+        databaseURL: "https://PROJEN-default-rtdb.firebaseio.com",
+        projectId: "PROJEN",
+        storageBucket: "PROJEN.appspot.com",
+        messagingSenderId: "SAYILAR",
+        appId: "APP_ID"
+    };
+    // -------------------------------------------------------
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // Veriler artık local'den değil, veritabanından gelecek
+    let state = {
+        teams: [],
+        matches: [],
+        byeTeam: null,
+        fixtures: []
+    };
+
+    // Veritabanını dinle (Biri bir şey değiştirirse sayfan otomatik yenilenir!)
+    db.ref('tournament').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            state = data;
+            renderAll();
+        } else {
+            state = { teams: [], matches: [], byeTeam: null, fixtures: [] };
+            renderAll();
+        }
+    });
+
+    function updateDB() {
+        db.ref('tournament').set(state);
+    }
+
+    function addTeam() {
+        const name = document.getElementById('teamName').value.trim();
+        if(name) {
+            if(!state.teams) state.teams = [];
+            state.teams.push({ name: name, G: 0, AV: 0, GS: 0, active: true });
+            document.getElementById('teamName').value = "";
+            updateDB();
+        }
+    }
+
+    function drawMatches() {
+        let activeTeams = state.teams.filter(t => t.active).sort(() => Math.random() - 0.5);
+        if(activeTeams.length < 2) return;
+        state.matches = []; state.byeTeam = null;
+        if(activeTeams.length % 2 !== 0) state.byeTeam = activeTeams.pop();
+        for(let i = 0; i < activeTeams.length; i += 2) {
+            state.matches.push({ t1: activeTeams[i].name, t2: activeTeams[i+1].name, s1: 0, s2: 0 });
+        }
+        updateDB();
+    }
+
+    function updateScore(i, tNum, val) {
+        state.matches[i]['s'+tNum] = parseInt(val) || 0;
+        updateDB();
+    }
+
+    // Geri kalan render fonksiyonlarını (renderMatches, renderAll vb.) 
+    // önceki koddan buraya entegre edip 'save()' yerine 'updateDB()' yazman yeterli.
+    
+    function renderAll() {
+        // Puan Tablosu Render
+        const tbody = document.getElementById('statsTable');
+        let sorted = [...(state.teams || [])].sort((a,b) => b.G - a.G || b.AV - a.AV);
+        tbody.innerHTML = "<tr><th>TAKIM</th><th>G</th><th>AV</th></tr>" + sorted.map(t => `
+            <tr style="opacity: ${t.active ? 1 : 0.4}">
+                <td>${t.name}</td><td>${t.G}</td><td>${t.AV}</td>
+            </tr>`).join('');
+
+        // Maçları Render et
+        const div = document.getElementById('bracket');
+        div.innerHTML = state.byeTeam ? `<div class="match-card">🌟 ${state.byeTeam.name} (Bay)</div>` : "";
+        (state.matches || []).forEach((m, i) => {
+            div.innerHTML += `<div class="match-card">
+                <span>${m.t1}</span>
+                <input type="number" class="score-input" onchange="updateScore(${i},1,this.value)" value="${m.s1}">
+                <input type="number" class="score-input" onchange="updateScore(${i},2,this.value)" value="${m.s2}">
+                <span>${m.t2}</span>
+            </div>`;
+        });
+        document.getElementById('nextRoundBtn').style.display = (state.matches && state.matches.length > 0) ? 'block' : 'none';
+    }
+
+    function clearData() { if(confirm("Sıfırlansın mı?")) db.ref('tournament').remove(); }
+</script>
+</body>
+</html>
